@@ -1,18 +1,21 @@
-TARGET = meu_programa
 CC = cc
 CFLAGS = -Wall -g
-SOURCES = main.c hello.c
-OBJECTS = $(SOURCES:.c=.o)
 
-all: $(TARGET)
+all: main hello
 
-$(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $(TARGET)
+main: main.o
+	$(CC) main.o -o main
 
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+hello: hello.o
+	$(CC) hello.o -o hello
+
+main.o: main.c
+	$(CC) $(CFLAGS) -c main.c -o main.o
+
+hello.o: hello.c
+	$(CC) $(CFLAGS) -c hello.c -o hello.o
 
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f *.o main hello
 
 .PHONY: all clean
