@@ -14,7 +14,7 @@ int main()
 {
     
     int n;
-    printf("insira o numero de execuções:\t \n")
+    printf("insira o numero de execuções:\t \n");
     scanf("%d", &n);
     
     
@@ -23,8 +23,8 @@ int main()
     pid_t pid = fork();
     if(pid == 0){
         
-         printf(" execução do processo filho"; // Corrected printf statement
-         //execl("./hello", "hello", NULL);
+         printf(" execução do processo filho"); // Corrected printf statement
+         execl("./hello", "hello", NULL);
         
     }
     else if(pid > 0){
