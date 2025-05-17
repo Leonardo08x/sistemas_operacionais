@@ -27,7 +27,7 @@ int main()
          //execl("./hello", "hello", NULL);
         
     }
-    else if(pidd > 0){
+    else if(pid > 0){
         printf("execução do processo pai"); // Corrected printf statement
     }
    
