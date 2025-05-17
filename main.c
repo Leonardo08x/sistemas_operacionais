@@ -1,36 +1,24 @@
-/******************************************************************************
-
-Welcome to GDB Online.
-  GDB online is an online compiler and debugger tool for C, C++, Python, PHP, Ruby, 
-  C#, OCaml, VB, Perl, Swift, Prolog, Javascript, Pascal, COBOL, HTML, CSS, JS
-  Code, Compile, Run and Debug online from anywhere in world.
-
-*******************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-int main()
-{
-    
+int main() {
     int n;
-    printf("insira o numero de execuções:\t \n");
+    printf("Insira o número de execuções: ");
     scanf("%d", &n);
-    
-    
-    
-    for(int i=0; i<n; i++){
-    pid_t pid = fork();
-    if(pid == 0){
-        
-         printf(" execução do processo filho"); // Corrected printf statement
-         execl("./hello", "hello", NULL);
-        
-    }
-    else if(pid > 0){
-        printf("execução do processo pai"); // Corrected printf statement
-    }
-   
+
+    for (int i = 0; i < n; i++) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            printf("Execução do processo filho\n");
+            execl("./hello", "hello", NULL);
+            perror("execl failed");
+            exit(1);
+        } else if (pid > 0) {
+            printf("Execução do processo pai\n");
+        } else {
+            perror("fork failed");
+        }
     }
 
     return 0;
