@@ -22,8 +22,8 @@ When the philosopher is done eating he/she puts down the chopsticks and begins t
 #define COMENDO 2
 int estados[N];
 
-mthread_mutex_t mutex; // mutex principal para sincronização
-mthread_mutex_t s[N];  // mutexes para simular semáforos dos talheres
+mthread_mutex_t mutex;    // mutex principal para sincronização
+mthread_mutex_t talheres[N]; // mutexes para cada talher
 
 void *filosofos(void *arg);
 void pega_talher(int n);
@@ -37,10 +37,9 @@ int main() {
     // Inicializar mutex principal
     mthread_mutex_init(&mutex, NULL);
 
-    // Inicializar mutexes para os talheres (simulando semáforos)
+    // Inicializar mutexes para os talheres
     for (i = 0; i < N; i++) {
-        mthread_mutex_init(&s[i], NULL);
-        mthread_mutex_unlock(&s[i]); // Inicialmente desbloqueado (equivalente a semáforo com valor 1)
+        mthread_mutex_init(&talheres[i], NULL);
     }
 
     mthread_thread_t r[N];
@@ -75,26 +74,36 @@ void *filosofos(void *arg) {
 }
 
 void pega_talher(int n) {
-    mthread_mutex_lock(&mutex); // Pega lock para mudar estado
+    mthread_mutex_lock(&mutex);
     estados[n] = FAMINTO;
     comer(n);
-    mthread_mutex_unlock(&mutex); // Libera lock
-    mthread_mutex_lock(&s[n]);   // Bloqueia para simular sem_wait
+    mthread_mutex_unlock(&mutex);
+
+    // Pegar talheres na ordem: menor índice primeiro para evitar deadlock
+    if (ESQ(n) < DIR(n)) {
+        mthread_mutex_lock(&talheres[ESQ(n)]); // Pegar talher da esquerda
+        mthread_mutex_lock(&talheres[DIR(n)]); // Pegar talher da direita
+    } else {
+        mthread_mutex_lock(&talheres[DIR(n)]); // Pegar talher da direita
+        mthread_mutex_lock(&talheres[ESQ(n)]); // Pegar talher da esquerda
+    }
 }
 
 void devolve_talher(int n) {
-    mthread_mutex_lock(&mutex); // Pega lock para mudar estado
+    mthread_mutex_lock(&mutex);
     estados[n] = PENSANDO;
     comer(ESQ(n)); // Verifica se o vizinho à esquerda pode comer
     comer(DIR(n)); // Verifica se o vizinho à direita pode comer
-    mthread_mutex_unlock(&mutex); // Libera lock
-    mthread_mutex_unlock(&s[n]);  // Libera mutex do talher
+    mthread_mutex_unlock(&mutex);
+
+    // Liberar os talheres
+    mthread_mutex_unlock(&talheres[ESQ(n)]);
+    mthread_mutex_unlock(&talheres[DIR(n)]);
 }
 
 void comer(int n) {
     // Testar se pode comer
     if (estados[n] == FAMINTO && estados[ESQ(n)] != COMENDO && estados[DIR(n)] != COMENDO) {
         estados[n] = COMENDO;
-        mthread_mutex_unlock(&s[n]); // Simula sem_post, liberando o talher
     }
 }
