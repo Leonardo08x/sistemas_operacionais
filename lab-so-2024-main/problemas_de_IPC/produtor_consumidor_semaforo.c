@@ -7,44 +7,44 @@ por dados para serem consumidos.
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+#include <minix/mthread.h>
 #include <unistd.h>
-#include <semaphore.h>
 
-#define PR 1    //número de produtores
+#define PR 1    // número de produtores
 #define CN 1    // número de consumidores
-#define N 5     //tamanho do buffer
+#define N 5     // tamanho do buffer
 
 void *produtor(void *meuid);
 void *consumidor(void *meuid);
 
-sem_t empty;    // semáforo que controla as posições livres
-sem_t full;     // semáforo que controla as posições ocupadas
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;    // lock de acesso à região crítica
+mthread_mutex_t mutex;
+mthread_mutex_t empty;    // mutex simulando semáforo de posições livres
+mthread_mutex_t full;     // mutex simulando semáforo de posições ocupadas
+int empty_count = N;      // contador para simular semáforo empty
+int full_count = 0;       // contador para simular semáforo full
 
-int index_in = 0;      // inicializando índice de inserção
-int index_out = 0;     // inicializando índice de remoção
-int buffer[N] = {0};   // declarando e inicializando o vetor do buffer com 0 em todas as posições
+int index_in = 0;         // índice de inserção
+int index_out = 0;        // índice de remoção
+int buffer[N] = {0};      // buffer inicializado com 0
 
-void main(argc, argv)
-int argc;
-char *argv[];
-{
-
+int main(int argc, char *argv[]) {
   int erro;
-  int i, n, m;
+  int i;
   int *id;
 
-  sem_init(&empty, 0, N);     // inicializando o semáforo para analisar as posições do buffer que estão livres
-  sem_init(&full, 0, 0);      // inicializando o semáforo para analisar as posições do buffer que estão ocupadas
+  mthread_mutex_init(&mutex, NULL);
+  mthread_mutex_init(&empty, NULL);
+  mthread_mutex_init(&full, NULL);
+  mthread_mutex_unlock(&empty); // Inicialmente, empty está "liberado" (N posições livres)
+
   printf("BUFFER INICIALIZADO!\n");
-  
-  pthread_t tPid[PR];
+
+  mthread_thread_t tPid[PR];
 
   for (i = 0; i < PR; i++) {
     id = (int *)malloc(sizeof(int));
     *id = i;
-    erro = pthread_create(&tPid[i], NULL, produtor, (void *)(id));
+    erro = mthread_create(&tPid[i], NULL, (void *)produtor, *id);
 
     if (erro) {
       printf("erro na criacao do thread %d\n", i);
@@ -52,12 +52,12 @@ char *argv[];
     }
   }
 
-  pthread_t tCid[CN];
+  mthread_thread_t tCid[CN];
 
   for (i = 0; i < CN; i++) {
     id = (int *)malloc(sizeof(int));
     *id = i;
-    erro = pthread_create(&tCid[i], NULL, consumidor, (void *)(id));
+    erro = mthread_create(&tCid[i], NULL, (void *)consumidor, *id);
 
     if (erro) {
       printf("erro na criacao do thread %d\n", i);
@@ -65,52 +65,64 @@ char *argv[];
     }
   }
 
-  sem_destroy(&empty);    // destruíndo semáforo de posições livres
-  sem_destroy(&full);     // destruíndo semáforo de posições ocupadas
-  pthread_join(tPid[0], NULL);
+  mthread_join(tPid[0], NULL);
+  return 0;
 }
 
 void *produtor(void *pi) {
-  int item, value;
+  int item, i = (int)pi;
+
   while (1) {
-    item = rand()%5;     // produz dado
+    item = rand() % 5;     // produz dado
 
-    sem_wait(&empty);    // decrementa semáforo de posições livres (down)
-      pthread_mutex_lock(&mutex);     // produtor pega lock de acesso à região crítica
-        buffer[index_in] = item;      // buffer recebe dado
-        printf("Produtor   está inserindo o item %d no buffer[%d]\n", item, index_in);
-        index_in = (index_in+1)%N;    // cálculo do índice do buffer em que o dado será inserido
-      pthread_mutex_unlock(&mutex);   // produtor libera lock de acesso à região crítica
-    sem_post(&full);    // incrementa semáforo de posições ocupadas
-
-    sem_getvalue(&full, &value);    // verifica o valor do semáforo de posições ocupadas
-    if (value == N) {               // se semáforo igual a N
-      printf("BUFFER CHEIO!\n");    // buffer está cheio
+    mthread_mutex_lock(&mutex);
+    while (empty_count == 0) { // simula sem_wait(&empty)
+      mthread_mutex_unlock(&mutex);
+      mthread_mutex_lock(&empty);
+      mthread_mutex_lock(&mutex);
     }
+    empty_count--;         // decrementa contador de posições livres
 
-    sleep(rand()%3);
+    buffer[index_in] = item;      // insere dado no buffer
+    printf("Produtor %d está inserindo o item %d no buffer[%d]\n", i, item, index_in);
+    index_in = (index_in + 1) % N; // cálculo do índice circular
+
+    full_count++;          // incrementa contador de posições ocupadas
+    if (full_count == N) {
+      printf("BUFFER CHEIO!\n");
+    }
+    mthread_mutex_unlock(&full); // simula sem_post(&full)
+
+    mthread_mutex_unlock(&mutex);
+    sleep(rand() % 3);
   }
-  pthread_exit(0);
+  return NULL;
 }
 
 void *consumidor(void *pi) {
-  int item, value;
+  int item, i = (int)pi;
+
   while (1) {
-
-    sem_wait(&full);    // decrementa semáforo de posições ocupadas (down)
-      pthread_mutex_lock(&mutex);     // consumidor pega lock de acesso à região crítica
-        item = buffer[index_out];     // item recebe dado do buffer
-        printf("Consumidor está removendo o item %d do buffer[%d]\n", item, index_out);
-        index_out = (index_out+1)%N;  // cálculo do índice do buffer em que dado será removido
-      pthread_mutex_unlock(&mutex);   // consumidor libera lock de acesso à região crítica
-    sem_post(&empty);    // incrementa semáforo de posições livres (up)
-
-    sem_getvalue(&full, &value);    // verifica o valor do semáforo de posições ocupadas
-    if (value == 0) {               // se semáforo igual a 0
-      printf("BUFFER VAZIO!\n");    // buffer está vazio
+    mthread_mutex_lock(&mutex);
+    while (full_count == 0) { // simula sem_wait(&full)
+      mthread_mutex_unlock(&mutex);
+      mthread_mutex_lock(&full);
+      mthread_mutex_lock(&mutex);
     }
+    full_count--;          // decrementa contador de posições ocupadas
 
-    sleep(rand()%6);
+    item = buffer[index_out];     // remove dado do buffer
+    printf("Consumidor %d está removendo o item %d do buffer[%d]\n", i, item, index_out);
+    index_out = (index_out + 1) % N; // cálculo do índice circular
+
+    empty_count++;         // incrementa contador de posições livres
+    if (full_count == 0) {
+      printf("BUFFER VAZIO!\n");
+    }
+    mthread_mutex_unlock(&empty); // simula sem_post(&empty)
+
+    mthread_mutex_unlock(&mutex);
+    sleep(rand() % 6);
   }
-  pthread_exit(0);
+  return NULL;
 }
