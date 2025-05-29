@@ -1,89 +1,100 @@
-#include <stdio.h>
+/*
+The problem is defined as follows: There are 5 philosophers sitting at a round table. Between each adjacent pair of philosophers is a chopstick.
+In other words, there are five chopsticks. Each philosopher does two things: think and eat. The philosopher thinks for a while, and then stops
+thinking and becomes hungry. When the philosopher becomes hungry, he/she cannot eat until he/she owns the chopsticks to his/her left and right.
+When the philosopher is done eating he/she puts down the chopsticks and begins thinking again.
+*/
+
+// Adaptado para Minix com mthread
+
 #include <stdlib.h>
+#include <stdio.h>
+#include <minix/mthread.h>
+#include <time.h>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <fcntl.h>
 
-#define N 5
-#define LEFT(i) (i)
-#define RIGHT(i) ((i + 1) % N)
+#define N 5              // quantidade de talheres e filósofos
+#define ESQ(id) (id)     // talher da esquerda
+#define DIR(id) (id+1)%N // talher da direita
 
-const char *left_fork_files[N] = {
-    "fork0.lock",
-    "fork1.lock",
-    "fork2.lock",
-    "fork3.lock",
-    "fork4.lock"
-};
+#define PENSANDO 0
+#define FAMINTO 1
+#define COMENDO 2
+int estados[N];
 
-// Função para "pegar" o talher (cria arquivo lock)
-void pick_fork(const char *fork_file) {
-    int fd;
-    while (1) {
-        fd = open(fork_file, O_CREAT | O_EXCL, 0444);
-        if (fd >= 0) {
-            // Pegou o talher (lock criado)
-            close(fd);
-            break;
-        }
-        // Se não conseguiu criar o arquivo, espera e tenta de novo
-        usleep(100000); // 100ms
-    }
-}
+mthread_mutex_t mutex; // mutex principal para sincronização
+mthread_mutex_t s[N];  // mutexes para simular semáforos dos talheres
 
-// Função para "soltar" o talher (remove arquivo lock)
-void release_fork(const char *fork_file) {
-    unlink(fork_file);
-}
-
-void philosopher(int id) {
-    while (1) {
-        printf("Filosofo %d pensando...\n", id);
-        sleep(2);
-
-        // Filósofo pega os talheres na mesma ordem para evitar deadlock
-        if (id % 2 == 0) {
-            pick_fork(left_fork_files[LEFT(id)]);
-            pick_fork(left_fork_files[RIGHT(id)]);
-        } else {
-            pick_fork(left_fork_files[RIGHT(id)]);
-            pick_fork(left_fork_files[LEFT(id)]);
-        }
-
-        printf("\tFilosofo %d comendo...\n", id);
-        sleep(2);
-
-        release_fork(left_fork_files[LEFT(id)]);
-        release_fork(left_fork_files[RIGHT(id)]);
-
-        printf("\tFilosofo %d terminou de comer...\n", id);
-    }
-}
+void *filosofos(void *arg);
+void pega_talher(int n);
+void devolve_talher(int n);
+void comer(int n);
 
 int main() {
-    pid_t pid;
     int i;
+    int *id;
 
-    // Limpar arquivos de lock antigos
+    // Inicializar mutex principal
+    mthread_mutex_init(&mutex, NULL);
+
+    // Inicializar mutexes para os talheres (simulando semáforos)
     for (i = 0; i < N; i++) {
-        unlink(left_fork_files[i]);
+        mthread_mutex_init(&s[i], NULL);
+        mthread_mutex_unlock(&s[i]); // Inicialmente desbloqueado (equivalente a semáforo com valor 1)
     }
 
+    mthread_thread_t r[N];
+
+    // Criação das threads de filósofos
     for (i = 0; i < N; i++) {
-        pid = fork();
-        if (pid == 0) {
-            philosopher(i);
-            exit(0);
-        } else if (pid < 0) {
-            perror("fork");
-            exit(1);
-        }
+        id = (int *)malloc(sizeof(int));
+        *id = i;
+        mthread_create(&r[i], NULL, (void *)filosofos, *id);
     }
 
-    // Espera filhos (filósofos) terminarem (eles não terminam nesse loop infinito)
-    for (i = 0; i < N; i++) {
-        wait(NULL);
-    }
-
+    mthread_join(r[0], NULL);
     return 0;
+}
+
+void *filosofos(void *arg) {
+    int n = (int)arg; // mthread passa argumento diretamente como int
+    while (1) {
+        // Pensar
+        printf("Filosofo %d pensando ...\n", n);
+        sleep(3);
+
+        pega_talher(n);
+        // Comer
+        printf("\tFilosofo %d comendo ...\n", n);
+        sleep(3);
+
+        printf("\tFilosofo %d acabou de comer ...\n", n);
+        devolve_talher(n);
+    }
+    return NULL;
+}
+
+void pega_talher(int n) {
+    mthread_mutex_lock(&mutex); // Pega lock para mudar estado
+    estados[n] = FAMINTO;
+    comer(n);
+    mthread_mutex_unlock(&mutex); // Libera lock
+    mthread_mutex_lock(&s[n]);   // Bloqueia para simular sem_wait
+}
+
+void devolve_talher(int n) {
+    mthread_mutex_lock(&mutex); // Pega lock para mudar estado
+    estados[n] = PENSANDO;
+    comer(ESQ(n)); // Verifica se o vizinho à esquerda pode comer
+    comer(DIR(n)); // Verifica se o vizinho à direita pode comer
+    mthread_mutex_unlock(&mutex); // Libera lock
+    mthread_mutex_unlock(&s[n]);  // Libera mutex do talher
+}
+
+void comer(int n) {
+    // Testar se pode comer
+    if (estados[n] == FAMINTO && estados[ESQ(n)] != COMENDO && estados[DIR(n)] != COMENDO) {
+        estados[n] = COMENDO;
+        mthread_mutex_unlock(&s[n]); // Simula sem_post, liberando o talher
+    }
 }
