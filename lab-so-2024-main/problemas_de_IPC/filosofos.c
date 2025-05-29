@@ -76,7 +76,6 @@ void *filosofos(void *arg) {
 void pega_talher(int n) {
     mthread_mutex_lock(&mutex);
     estados[n] = FAMINTO;
-    comer(n);
     mthread_mutex_unlock(&mutex);
 
     // Pegar talheres na ordem: menor índice primeiro para evitar deadlock
@@ -87,6 +86,10 @@ void pega_talher(int n) {
         mthread_mutex_lock(&talheres[DIR(n)]); // Pegar talher da direita
         mthread_mutex_lock(&talheres[ESQ(n)]); // Pegar talher da esquerda
     }
+
+    mthread_mutex_lock(&mutex);
+    estados[n] = COMENDO;
+    mthread_mutex_unlock(&mutex);
 }
 
 void devolve_talher(int n) {
@@ -97,13 +100,13 @@ void devolve_talher(int n) {
     mthread_mutex_unlock(&mutex);
 
     // Liberar os talheres
-    mthread_mutex_unlock(&talheres[ESQ(n)]);
     mthread_mutex_unlock(&talheres[DIR(n)]);
+    mthread_mutex_unlock(&talheres[ESQ(n)]);
 }
 
 void comer(int n) {
-    // Testar se pode comer
+    // Notificar vizinhos, mas não alterar estado aqui
     if (estados[n] == FAMINTO && estados[ESQ(n)] != COMENDO && estados[DIR(n)] != COMENDO) {
-        estados[n] = COMENDO;
+        // Estado será atualizado em pega_talher após adquirir os talheres
     }
 }
