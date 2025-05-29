@@ -9,12 +9,12 @@ por dados para serem consumidos.
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+#include <minix/mthread.h>
 #include <unistd.h>
 
-#define PR 1  //número de produtores
+#define PR 1  // número de produtores
 #define CN 1  // número de consumidores
-#define N 5   //tamanho do buffer
+#define N 5   // tamanho do buffer
 
 void *produtor(void *meuid);
 void *consumidor(void *meuid);
@@ -25,33 +25,32 @@ void remove_data(long int i);
 
 int buffer[N] = {0};    // declarando e inicializando o vetor do buffer com 0 em todas as posições
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t produtor_cond = PTHREAD_COND_INITIALIZER;
-pthread_cond_t consumidor_cond = PTHREAD_COND_INITIALIZER;
+mthread_mutex_t mutex;
+mthread_cond_t produtor_cond;
+mthread_cond_t consumidor_cond;
 
 int count = 0;          // contador de posições
 int index_insert = -1;   // índice do produtor
 int index_remove = -1;   // índice do consumidor
 
-void main(argc, argv)
-int argc;
-char *argv[];
-{
-
+int main(int argc, char *argv[]) {
   int erro;
-  int i, n, m;
+  int i;
   int *id;
 
   printf("START ");
   print_buffer();
 
-  pthread_t tPid[PR];
+  mthread_thread_t tPid[PR];
 
-  for (i = 0; i < PR; i++)
-  {
+  mthread_mutex_init(&mutex, NULL);
+  mthread_cond_init(&produtor_cond, NULL);
+  mthread_cond_init(&consumidor_cond, NULL);
+
+  for (i = 0; i < PR; i++) {
     id = (int *)malloc(sizeof(int));
     *id = i;
-    erro = pthread_create(&tPid[i], NULL, produtor, (void *)(id));
+    erro = mthread_create(&tPid[i], NULL, (void *)produtor, *id);
 
     if (erro) {
       printf("erro na criacao do thread %d\n", i);
@@ -59,13 +58,12 @@ char *argv[];
     }
   }
 
-  pthread_t tCid[CN];
+  mthread_thread_t tCid[CN];
 
-  for (i = 0; i < CN; i++)
-  {
+  for (i = 0; i < CN; i++) {
     id = (int *)malloc(sizeof(int));
     *id = i;
-    erro = pthread_create(&tCid[i], NULL, consumidor, (void *)(id));
+    erro = mthread_create(&tCid[i], NULL, (void *)consumidor, *id);
 
     if (erro) {
       printf("erro na criacao do thread %d\n", i);
@@ -73,65 +71,67 @@ char *argv[];
     }
   }
 
-  pthread_join(tPid[0], NULL);  
+  mthread_join(tPid[0], NULL);
+  return 0;
 }
 
 void *produtor(void *pi) {
   int item;
+  int i = (int)pi;
 
   while (1) {
     sleep(rand() % 2);
     item = produce_item();
 
-    pthread_mutex_lock(&mutex);   // produtor pega o lock do buffer
-      while (count == N) {  // verifica se o buffer está cheio
-        printf("Buffer está cheio!\n\n");
-        pthread_cond_wait(&produtor_cond, &mutex);  // adormece o produtor
-      }
+    mthread_mutex_lock(&mutex);   // produtor pega o lock do buffer
+    while (count == N) {  // verifica se o buffer está cheio
+      printf("Buffer está cheio!\n\n");
+      mthread_cond_wait(&produtor_cond, &mutex);  // adormece o produtor
+    }
 
-      index_insert = (index_insert + 1) % N;    // cálculo do índice do array circular
-      insert_data(item, index_insert);      // inserir dado do buffer
-      printf("PRODUTOR está produzindo conteúdo\n");
-      
-      count += 1;
-      print_buffer();
-      
-      if (count == 1){  // verifica que o buffer não está vazio para acordar o consumidor
-        printf("Acorda consumidor!\n\n");
-        pthread_cond_signal(&consumidor_cond);  // como só tem 1 consumidor, não há problema usar signal
-      } 
-    pthread_mutex_unlock(&mutex);   // produtor solta o lock do buffer
+    index_insert = (index_insert + 1) % N;    // cálculo do índice do array circular
+    insert_data(item, index_insert);      // inserir dado do buffer
+    printf("PRODUTOR %d está produzindo conteúdo\n", i);
+    
+    count += 1;
+    print_buffer();
+    
+    if (count == 1) {  // verifica que o buffer não está vazio para acordar o consumidor
+      printf("Acorda consumidor!\n\n");
+      mthread_cond_signal(&consumidor_cond);  // como só tem 1 consumidor, não há problema usar signal
+    } 
+    mthread_mutex_unlock(&mutex);   // produtor solta o lock do buffer
     sleep(rand() % 2);
-    // sleep((rand() % 5) + 5);     // teste -> alternar com consumidor
   }
-  pthread_exit(0);
+  return NULL;
 }
 
 void *consumidor(void *pi) {
+  int i = (int)pi;
+
   while (1) {
     sleep(rand() % 2);
 
-    pthread_mutex_lock(&mutex);   // consumidor pega o lock do buffer
-      while (count == 0) {    // verifica se o buffer está vazio
-        printf("Buffer está vazio!\n\n");
-        pthread_cond_wait(&consumidor_cond, &mutex);    // adormece o consumidor
-      }
-      index_remove = (index_remove + 1) % N;    // cálculo do índice do array circular
-      remove_data(index_remove);    // remover dado do buffer
-      printf("CONSUMIDOR está consumindo conteúdo\n");
+    mthread_mutex_lock(&mutex);   // consumidor pega o lock do buffer
+    while (count == 0) {    // verifica se o buffer está vazio
+      printf("Buffer está vazio!\n\n");
+      mthread_cond_wait(&consumidor_cond, &mutex);    // adormece o consumidor
+    }
+    index_remove = (index_remove + 1) % N;    // cálculo do índice do array circular
+    remove_data(index_remove);    // remover dado do buffer
+    printf("CONSUMIDOR %d está consumindo conteúdo\n", i);
 
-      count -= 1;
-      print_buffer();
+    count -= 1;
+    print_buffer();
 
-      if (count == N - 1){    // verifica que o buffer não está cheio para acordar o produtor
-        printf("Acorda produtor!\n\n");
-        pthread_cond_signal(&produtor_cond);    // como só tem 1 produtor, não há problema usar signal
-      }
-    pthread_mutex_unlock(&mutex);   // consumidor solta o lock do buffer
-    // sleep(rand() % 2);
-    sleep((rand() % 5) + 1);     // teste -> alternar com produtor
+    if (count == N - 1) {    // verifica que o buffer não está cheio para acordar o produtor
+      printf("Acorda produtor!\n\n");
+      mthread_cond_signal(&produtor_cond);    // como só tem 1 produtor, não há problema usar signal
+    }
+    mthread_mutex_unlock(&mutex);   // consumidor solta o lock do buffer
+    sleep((rand() % 5) + 1);
   }
-  pthread_exit(0);
+  return NULL;
 }
 
 void print_buffer() {
@@ -142,14 +142,14 @@ void print_buffer() {
   printf("\n");
 }
 
-int produce_item(){
+int produce_item() {
   return 1;
 }
 
-void insert_data(int data, int index){
+void insert_data(int data, int index) {
   buffer[index] = data;
 }
 
-void remove_data(long int index){
+void remove_data(long int index) {
   buffer[index] = 0;
 }
