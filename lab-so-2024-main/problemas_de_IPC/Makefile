@@ -1,14 +1,14 @@
 OUTPUT=filosofos
 
-CC=gcc
+CC=cc
 CC_OPT=-std=c11 -w
-# CC_PTH removido porque não existe pthread no MINIX
+# Removi a flag -pthread porque não funciona no MINIX
 
 .PHONY: all
 all: $(OUTPUT)
 
 $(OUTPUT): $(OUTPUT).c
-	$(CC) -o $(OUTPUT) $(CC_OPT) $(OUTPUT).c
+	$(CC) $(CC_OPT) -o $(OUTPUT) $(OUTPUT).c
 
 .PHONY: clean
 clean:
@@ -17,4 +17,3 @@ clean:
 .PHONY: run
 run:
 	./$(OUTPUT)
-
