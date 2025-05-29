@@ -1,104 +1,89 @@
-/*
-The problem is defined as follows: There are 5 philosophers sitting at a round table. Between each adjacent pair of philosophers is a chopstick.
-In other words, there are five chopsticks. Each philosopher does two things: think and eat. The philosopher thinks for a while, and then stops
-thinking and becomes hungry. When the philosopher becomes hungry, he/she cannot eat until he/she owns the chopsticks to his/her left and right.
-When the philosopher is done eating he/she puts down the chopsticks and begins thinking again.
-*/
-
-// https://web.archive.org/web/20131208203319/http://web.eecs.utk.edu/~plank/plank/classes/cs560/560/notes/Dphil/lecture.html
-
-#include <stdlib.h>
 #include <stdio.h>
-#include <pthread.h>
-#include <time.h>
+#include <stdlib.h>
 #include <unistd.h>
-#include <semaphore.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
-#define N 5					// quantidade de talheres e filósofos
-#define ESQ(id) (id)		// talher da esquerda
-#define DIR(id)	(id+1)%N	// talher da direita
+#define N 5
+#define LEFT(i) (i)
+#define RIGHT(i) ((i + 1) % N)
 
-#define PENSANDO 0
-#define FAMINTO 1
-#define COMENDO 2
-int estados[N];
+const char *left_fork_files[N] = {
+    "fork0.lock",
+    "fork1.lock",
+    "fork2.lock",
+    "fork3.lock",
+    "fork4.lock"
+};
 
-sem_t s[N];		// semáforo para os talheres
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void *filosofos (void *arg);
-void pega_talher (int n);		// funções executadas pelos filósofo
-void devolve_talher (int n);	// funções executadas pelos filósofo
-void comer (int n);		// funções executadas pelos filósofo
-
-int main () {
-	int i;
-	int *id;
-	//semaforo 
-	for (i=0; i<N; i++) {
-		sem_init(&s[i], 0, 0);		// inicialização semáforo, filosofo incrementa semáforo quando pega o talher
-	}
-	pthread_t r[N]; 
-
-	//criacao das threads de filosofos
-    for (i = 0; i < N ; i++) {
-		id = (int *) malloc(sizeof(int));
-		*id = i;
-		pthread_create(&r[i], NULL, filosofos, (void*) (id));
-	}
-
-    pthread_join(r[0],NULL);
-	return 0;
+// Função para "pegar" o talher (cria arquivo lock)
+void pick_fork(const char *fork_file) {
+    int fd;
+    while (1) {
+        fd = open(fork_file, O_CREAT | O_EXCL, 0444);
+        if (fd >= 0) {
+            // Pegou o talher (lock criado)
+            close(fd);
+            break;
+        }
+        // Se não conseguiu criar o arquivo, espera e tenta de novo
+        usleep(100000); // 100ms
+    }
 }
 
-void *filosofos (void *arg) {
-	int n = *((int *) arg);
-	while(1) {
-		//pensar
-		printf("Filosofo %d pensando ...\n", n);
-		sleep(3);
-		
-		pega_talher(n);
-		//comer
-		printf("\tFilosofo %d comendo ...\n", n);
-		sleep(3);
-        
-		printf("\tFilosofo %d acabou de comer ...\n", n);
-		devolve_talher(n);
-	} 
+// Função para "soltar" o talher (remove arquivo lock)
+void release_fork(const char *fork_file) {
+    unlink(fork_file);
 }
 
-void pega_talher (int n) {		// n = id do filófoso
-	/*
-	if(n/2 == 0){
-		sem_wait(&s[DIR(n)]);
-		sleep(1);
-		sem_wait(&s[ESQ(n)]);
-	}else{
-		sem_wait(&s[ESQ(n)]);
-		sleep(1);
-		sem_wait(&s[DIR(n)]);
-	} */
+void philosopher(int id) {
+    while (1) {
+        printf("Filosofo %d pensando...\n", id);
+        sleep(2);
 
-	pthread_mutex_lock(&mutex);		// pega lock para mudar estado
-		estados[n] = FAMINTO;
-		comer(n);
-	pthread_mutex_unlock(&mutex);	// libera lock
-	sem_wait(&s[n]);	// decrementa semáforo para talher ficar livre
+        // Filósofo pega os talheres na mesma ordem para evitar deadlock
+        if (id % 2 == 0) {
+            pick_fork(left_fork_files[LEFT(id)]);
+            pick_fork(left_fork_files[RIGHT(id)]);
+        } else {
+            pick_fork(left_fork_files[RIGHT(id)]);
+            pick_fork(left_fork_files[LEFT(id)]);
+        }
+
+        printf("\tFilosofo %d comendo...\n", id);
+        sleep(2);
+
+        release_fork(left_fork_files[LEFT(id)]);
+        release_fork(left_fork_files[RIGHT(id)]);
+
+        printf("\tFilosofo %d terminou de comer...\n", id);
+    }
 }
 
-void devolve_talher (int n) {
-	pthread_mutex_lock(&mutex);		// pega lock para mudar estado
-		estados[n] = PENSANDO;
-		comer(ESQ(n));	// fazer vizinho comer
-		comer(DIR(n));	// fazer vizinho comer
-	pthread_mutex_unlock(&mutex);	// libera lock
-}
+int main() {
+    pid_t pid;
+    int i;
 
-void comer (int n) {
-	// testar se pode comer
-	if(estados[n] == FAMINTO && estados[ESQ(n)] != COMENDO && estados[DIR(n)] != COMENDO) {
-		estados[n] = COMENDO;
-		sem_post(&s[n]);	// incrementa semáforo pra indicar que pegou talher
-	}
+    // Limpar arquivos de lock antigos
+    for (i = 0; i < N; i++) {
+        unlink(left_fork_files[i]);
+    }
+
+    for (i = 0; i < N; i++) {
+        pid = fork();
+        if (pid == 0) {
+            philosopher(i);
+            exit(0);
+        } else if (pid < 0) {
+            perror("fork");
+            exit(1);
+        }
+    }
+
+    // Espera filhos (filósofos) terminarem (eles não terminam nesse loop infinito)
+    for (i = 0; i < N; i++) {
+        wait(NULL);
+    }
+
+    return 0;
 }
