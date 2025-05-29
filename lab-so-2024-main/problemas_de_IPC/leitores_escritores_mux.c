@@ -1,117 +1,125 @@
 /*
 Este problema é uma abstração do acesso à base de dados, onde não existe o perigo em termos diversos processos lendo concorrentemente (leitores), mas escrevendo ou 
 mudando os dados (escritores) deve ser feito sob exclusão mútua para garantir consistência. Leitores e escritores é uma família de modelos de controle de concorrência 
-em que leitores (entes que não alteram conteúdo) pode acessar concorrentemente os recursos (por exemplo, um banco de dados) e escritores (entes que alteram conteúdo) 
-requerem acesso exclusivo. Usando como base o código disponibilizado neste tópico, resolva o problema de starvation dos escritores.
+em que leitores (entes que não alteram conteúdo) podem acessar concorrentemente os recursos (por exemplo, um banco de dados) e escritores (entes que alteram conteúdo) 
+requerem acesso exclusivo. Este código resolve o problema de starvation dos escritores.
 */
 
-#include "stdio.h"
-#include "unistd.h"
-#include "stdlib.h"
-#include "pthread.h"
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <minix/mthread.h>
 
 #define TRUE 1
+#define NE 10 // número de escritores
+#define NL 10 // número de leitores
 
-#define NE 10 //numero de escritores
-#define NL 10 //numero de leitores
-
-// (se usar apenas um lock garante a exclusão mútua da região crítica por apenas 1 leitor ou 1 escritor)
-pthread_mutex_t lock_bd = PTHREAD_MUTEX_INITIALIZER;	// lock do banco de dados
-pthread_mutex_t lock_nl = PTHREAD_MUTEX_INITIALIZER;	// lock de leitura
-pthread_mutex_t lock_vez = PTHREAD_MUTEX_INITIALIZER;	// lock da vez que quem vai passar --> serve para os leitores e escritores competirem entre si pra pegar o lock do banco de dados
-
-int num_leitores = 0;	 // contador de leitores que estão acessando o banco de dados para leitura
+mthread_mutex_t lock_bd;  // lock do banco de dados
+mthread_mutex_t lock_nl;  // lock de leitura
+mthread_mutex_t lock_vez; // lock da vez (competição entre leitores e escritores)
+int num_leitores = 0;     // contador de leitores acessando o banco de dados
+int escritores_esperando = 0; // contador de escritores esperando (para evitar starvation)
 
 void *reader(void *arg); // thread de execução dos leitores
 void *writer(void *arg); // thread de execução dos escritores
-void read_data_base();	 // função usada pelo leitor para ler um dado na base de dados					// acessa região crítica
-void use_data_read();	 // função usada pelo leitor para usar o dado lido								// não acessa região crítica
-void think_up_data();	 // função usada pelo escritor para produzir um dado							// não acessa região crítica
-void write_data_base();	 // função usada pelo escritor para escrever o dado produzido na base de dados	// acessa região crítica
+void read_data_base(int i); // função usada pelo leitor para ler um dado
+void use_data_read(int i);  // função usada pelo leitor para usar o dado lido
+void think_up_data(int i);  // função usada pelo escritor para produzir um dado
+void write_data_base(int i); // função usada pelo escritor para escrever o dado
 
-int main(){
-	pthread_t r[NL], w[NE]; // 2 vetores: 1 para leitores e 1 para escritores
-	int i;
-	int *id;
-	/* criando leitores */
-	for (i = 0; i < NL; i++)
-	{
-		id = (int *)malloc(sizeof(int));
-		*id = i;
-		pthread_create(&r[i], NULL, reader, (void *)(id));
-	}
-	/* criando escritores */
-	for (i = 0; i < NE; i++)
-	{
-		id = (int *)malloc(sizeof(int));
-		*id = i;
-		pthread_create(&w[i], NULL, writer, (void *)(id));
-	}
-	pthread_join(r[0], NULL); // dá join em apenas 1 dos leitores, pois bloqueia a main e garante que as threads sempre executem
-	return 0;
+int main() {
+    mthread_thread_t r[NL], w[NE]; // vetores para leitores e escritores
+    int i;
+    int *id;
+
+    // Inicializar mutexes
+    mthread_mutex_init(&lock_bd, NULL);
+    mthread_mutex_init(&lock_nl, NULL);
+    mthread_mutex_init(&lock_vez, NULL);
+
+    // Criando leitores
+    for (i = 0; i < NL; i++) {
+        id = (int *)malloc(sizeof(int));
+        *id = i;
+        mthread_create(&r[i], NULL, (void *)reader, *id);
+    }
+
+    // Criando escritores
+    for (i = 0; i < NE; i++) {
+        id = (int *)malloc(sizeof(int));
+        *id = i;
+        mthread_create(&w[i], NULL, (void *)writer, *id);
+    }
+
+    mthread_join(r[0], NULL); // espera por um leitor para manter a main bloqueada
+    return 0;
 }
 
-void *reader(void *arg)
-{
-	int i = *((int *)arg);
-	while (TRUE){ /* repete para sempre */
-		// região de exclusão mútua, entre os leitores
-		pthread_mutex_lock(&lock_vez);				// escritor pega lock vez
-			pthread_mutex_lock(&lock_nl);			// leitor pega o lock de leitura
-				num_leitores++;						// incrementa contador de leitores acessando o banco de dados
-				if (num_leitores == 1){				// teste para ver se é o primeiro leitor
-					pthread_mutex_lock(&lock_bd); 	// se for o primeiro, fecha o lock do banco de dados
-				}
-			pthread_mutex_unlock(&lock_vez);		// escritor libera o lock vez		
-		pthread_mutex_unlock(&lock_nl);				// leitor libera o lock de leitura
+void *reader(void *arg) {
+    int i = (int)arg; // mthread passa argumento como int
+    while (TRUE) {
+        // Verifica se há escritores esperando antes de tentar ler
+        mthread_mutex_lock(&lock_vez);
+        if (escritores_esperando > 0) {
+            mthread_mutex_unlock(&lock_vez);
+            usleep(100000); // Espera brevemente para dar chance aos escritores
+            continue; // Tenta novamente
+        }
 
-	
-		read_data_base(i); 							/* acesso aos dados */
+        mthread_mutex_lock(&lock_nl);
+        num_leitores++;
+        if (num_leitores == 1) {
+            mthread_mutex_lock(&lock_bd); // Primeiro leitor bloqueia o banco
+        }
+        mthread_mutex_unlock(&lock_vez);
+        mthread_mutex_unlock(&lock_nl);
 
-		// região de exclusão mútua, entre os leitores
-		pthread_mutex_lock(&lock_nl);				// leitor pega o lock de leitura
-			num_leitores--;							// decrementa contador de leitores acessando o banco de dados
-			if (num_leitores == 0){					// teste para ver se é o último leitor
-				pthread_mutex_unlock(&lock_bd);		// se for o último, libera o lock do banco de dados
-			}
-		pthread_mutex_unlock(&lock_nl);				// leitor libera o lock de leitura
-		
-		use_data_read(i);							/* região não crítica */	// fica fora do lock, pois não atrapalha o acesso aos dados
-	}
-	pthread_exit(0);
+        read_data_base(i); // Acessa região crítica
+
+        mthread_mutex_lock(&lock_nl);
+        num_leitores--;
+        if (num_leitores == 0) {
+            mthread_mutex_unlock(&lock_bd); // Último leitor libera o banco
+        }
+        mthread_mutex_unlock(&lock_nl);
+
+        use_data_read(i); // Região não crítica
+    }
+    return NULL;
 }
 
-void *writer(void *arg){
-	int i = *((int *)arg);
-	while (TRUE){								/* repete para sempre */	
-		think_up_data(i); 						/* região não crítica */		// fica fora do lock, pois não atrapalha o acesso aos dados
-		pthread_mutex_lock(&lock_vez);			// escritor pega lock vez
-			// o lock garante que mais de um escritor não acesse o banco de dados ao mesmo tempo, vai ter sempre no máximo 1 escritor na região crítica
-			pthread_mutex_lock(&lock_bd);		// escritor pega o lock do banco de dado
-				write_data_base(i); 			/* atualiza os dados */
-			pthread_mutex_unlock(&lock_vez);	// escritor libera o lock vez
-		pthread_mutex_unlock(&lock_bd);			// escritor libera o lock do banco de dados
+void *writer(void *arg) {
+    int i = (int)arg;
+    while (TRUE) {
+        think_up_data(i); // Região não crítica
 
-	}
-	pthread_exit(0);
+        mthread_mutex_lock(&lock_vez);
+        escritores_esperando++; // Sinaliza que um escritor está esperando
+        mthread_mutex_lock(&lock_bd); // Bloqueia o banco de dados
+        escritores_esperando--; // Escritor conseguiu acesso, decrementa
+        write_data_base(i); // Atualiza os dados
+        mthread_mutex_unlock(&lock_vez);
+        mthread_mutex_unlock(&lock_bd); // Libera o banco de dados
+    }
+    return NULL;
 }
 
-void read_data_base(int i){
-	printf("Leitor %d está lendo os dados! Número de leitores: %d\n", i, num_leitores);
-	sleep(rand() % 5);
+void read_data_base(int i) {
+    printf("Leitor %d está lendo os dados! Número de leitores: %d\n", i, num_leitores);
+    sleep(rand() % 5);
 }
 
-void use_data_read(int i){
-	printf("Leitor %d está usando os dados lidos! Número de leitores: %d\n", i, num_leitores);
-	sleep(rand() % 5);
+void use_data_read(int i) {
+    printf("Leitor %d está usando os dados lidos! Número de leitores: %d\n", i, num_leitores);
+    sleep(rand() % 5);
 }
 
-void think_up_data(int i){
-	printf("Escritor %d está pensando no que escrever!\n", i);
-	sleep(rand() % 5);
+void think_up_data(int i) {
+    printf("Escritor %d está pensando no que escrever!\n", i);
+    sleep(rand() % 5);
 }
 
-void write_data_base(int i){
-	printf("Escritor %d está escrevendo os dados! Número de leitores: %d\n", i, num_leitores);
-	sleep(rand() % 5 + 15);
+void write_data_base(int i) {
+    printf("Escritor %d está escrevendo os dados! Número de leitores: %d\n", i, num_leitores);
+    sleep(rand() % 5 + 15);
 }
