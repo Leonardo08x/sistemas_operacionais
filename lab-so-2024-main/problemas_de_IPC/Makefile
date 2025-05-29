@@ -1,19 +1,25 @@
-OUTPUT=filosofos
+# Makefile para compilar os programas filosofos, leitores_escritores_mux, produtor_consumidor_condicao e produtor_consumidor_semaforo
 
-CC=cc
-CC_OPT=-std=c11 -w
-# Removi a flag -pthread porque não funciona no MINIX
+CC = cc
+CFLAGS = -Wall
+LDFLAGS = -lmthread
+TARGETS = filosofos leitores_escritores_mux produtor_consumidor_condicao produtor_consumidor_semaforo
 
-.PHONY: all
-all: $(OUTPUT)
+all: $(TARGETS)
 
-$(OUTPUT): $(OUTPUT).c
-	$(CC) $(CC_OPT) -o $(OUTPUT) $(OUTPUT).c
+filosofos: filosofos.c
+	$(CC) $(CFLAGS) -o filosofos filosofos.c $(LDFLAGS)
 
-.PHONY: clean
+leitores_escritores_mux: leitores_escritores_mux.c
+	$(CC) $(CFLAGS) -o leitores_escritores_mux leitores_escritores_mux.c $(LDFLAGS)
+
+produtor_consumidor_condicao: produtor_consumidor_condicao.c
+	$(CC) $(CFLAGS) -o produtor_consumidor_condicao produtor_consumidor_condicao.c $(LDFLAGS)
+
+produtor_consumidor_semaforo: produtor_consumidor_semaforo.c
+	$(CC) $(CFLAGS) -o produtor_consumidor_semaforo produtor_consumidor_semaforo.c $(LDFLAGS)
+
 clean:
-	rm -f $(OUTPUT)
+	rm -f $(TARGETS)
 
-.PHONY: run
-run:
-	./$(OUTPUT)
+.PHONY: all clean
