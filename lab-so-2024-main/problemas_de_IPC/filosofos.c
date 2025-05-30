@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <minix/mthread.h>
+#include <semaphore.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -14,12 +15,12 @@
 
 int estados[N];              // Array para armazenar o estado de cada filósofo
 mthread_mutex_t mutex;       // Protege o array `estados`
-mthread_mutex_t talheres[N]; // Mutexes para os talheres
+sem_t talheres[N];           // Semáforos para os talheres (um por talher)
 
 void *filosofos(void *arg);
 void pega_talheres(int n);
 void devolve_talheres(int n);
-void testa_comer(int n);     // Nova função para verificar se o filósofo pode comer
+void testa_comer(int n);
 
 int main() {
     int i;
@@ -28,10 +29,10 @@ int main() {
     srand(time(NULL));       // Inicializa a semente para números aleatórios
     mthread_mutex_init(&mutex, NULL);
 
-    // Inicializa os talheres (mutexes)
+    // Inicializa os semáforos dos talheres
     for (i = 0; i < N; i++) {
         estados[i] = PENSANDO; // Inicializa todos os filósofos como PENSANDO
-        mthread_mutex_init(&talheres[i], NULL);
+        sem_init(&talheres[i], 0, 1); // Inicializa cada semáforo com valor 1 (talher disponível)
     }
 
     mthread_thread_t threads[N];
@@ -41,24 +42,30 @@ int main() {
         ids[i] = malloc(sizeof(int));
         *ids[i] = i;
         if (mthread_create(&threads[i], NULL, filosofos, (void *)ids[i]) == 0) {
-            printf("Thread do filósofo %d criada com sucesso.\n", i); // Log de criação
+            printf("Thread do filósofo %d criada com sucesso.\n", i);
         } else {
             printf("Erro ao criar thread do filósofo %d.\n", i);
             exit(1);
         }
     }
 
-    // Espera todas as threads (loop infinito)
+    // Espera todas as threads
     for (i = 0; i < N; i++) {
         mthread_join(threads[i], NULL);
         free(ids[i]); // Libera memória após a thread terminar
     }
 
+    // Destroi os semáforos
+    for (i = 0; i < N; i++) {
+        sem_destroy(&talheres[i]);
+    }
+    mthread_mutex_destroy(&mutex);
+
     return 0;
 }
 
 void *filosofos(void *arg) {
-    int n = *((int *)arg); // Não libera arg aqui, será liberado no main
+    int n = *((int *)arg); // Extrai o ID do filósofo
 
     while (1) {
         // Pensar
@@ -72,9 +79,9 @@ void *filosofos(void *arg) {
         testa_comer(n);       // Verifica se pode comer
         mthread_mutex_unlock(&mutex);
 
-        // Aguarda até poder comer (se necessário)
-        mthread_mutex_lock(&talheres[n]); // Usa o mutex do filósofo como proxy para espera
-        mthread_mutex_unlock(&talheres[n]);
+        // Aguarda até poder comer
+        sem_wait(&talheres[n]); // Usa o semáforo do filósofo como proxy para espera
+        sem_post(&talheres[n]);
 
         // Comer
         printf("\tFilósofo %d COMENDO...\n", n);
@@ -88,23 +95,20 @@ void *filosofos(void *arg) {
 }
 
 void pega_talheres(int n) {
-    // Define a ordem para pegar os talheres (evita deadlock)
+    // Pega os talheres em ordem crescente para evitar deadlock
     int primeiro = ESQ(n) < DIR(n) ? ESQ(n) : DIR(n);
     int segundo = ESQ(n) < DIR(n) ? DIR(n) : ESQ(n);
 
-    // Pega o primeiro talher
-    mthread_mutex_lock(&talheres[primeiro]);
+    sem_wait(&talheres[primeiro]); // Decrementa o semáforo do primeiro talher
     printf("\tFilósofo %d pegou talher %d\n", n, primeiro);
-
-    // Pega o segundo talher
-    mthread_mutex_lock(&talheres[segundo]);
+    sem_wait(&talheres[segundo]);  // Decrementa o semáforo do segundo talher
     printf("\tFilósofo %d pegou talher %d\n", n, segundo);
 }
 
 void devolve_talheres(int n) {
     // Libera os talheres
-    mthread_mutex_unlock(&talheres[ESQ(n)]);
-    mthread_mutex_unlock(&talheres[DIR(n)]);
+    sem_post(&talheres[ESQ(n)]); // Incrementa o semáforo do talher à esquerda
+    sem_post(&talheres[DIR(n)]); // Incrementa o semáforo do talher à direita
 
     // Atualiza o estado para PENSANDO e verifica vizinhos
     mthread_mutex_lock(&mutex);
