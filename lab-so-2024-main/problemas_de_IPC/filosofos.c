@@ -13,9 +13,8 @@
 #define COMENDO 2
 
 int estados[N];              // Array para armazenar o estado de cada filósofo
-mthread_mutex_t mutex;       // Mutex único para proteger estados e talheres
-int talheres_disponiveis[N] = {1, 1, 1, 1, 1}; // 1 = talher disponível, 0 = talher ocupado
-int turno = 0;               // Controla qual filósofo tem prioridade para tentar comer
+mthread_mutex_t mutex;       // Mutex único para proteger todas as operações
+int filosofo_ativo = 0;      // Controla qual filósofo está ativo (0 a 4)
 
 void *filosofos(void *arg);
 void tenta_comer(int n);
@@ -73,9 +72,9 @@ void *filosofos(void *arg) {
         tenta_comer(n);
         mthread_mutex_unlock(&mutex);
 
-        // Aguarda até poder comer
+        // Aguarda até ser o filósofo ativo e poder comer
         while (estados[n] != COMENDO) {
-            sleep(1); // Pausa para evitar busy-waiting e dar chance a outras threads
+            sleep(1); // Pausa para dar chance a outras threads
             mthread_mutex_lock(&mutex);
             tenta_comer(n);
             mthread_mutex_unlock(&mutex);
@@ -95,28 +94,23 @@ void *filosofos(void *arg) {
 }
 
 void tenta_comer(int n) {
-    // Verifica se é o turno do filósofo e se ele pode comer
+    // Verifica se é o filósofo ativo e se os vizinhos não estão comendo
     if (estados[n] == FAMINTO &&
         estados[ESQ(n)] != COMENDO && estados[DIR(n)] != COMENDO &&
-        talheres_disponiveis[ESQ(n)] && talheres_disponiveis[DIR(n)] &&
-        turno == n) {
+        filosofo_ativo == n) {
         estados[n] = COMENDO;
         pega_talheres(n);
-        turno = (turno + 1) % N; // Passa o turno para o próximo filósofo
+        filosofo_ativo = (filosofo_ativo + 1) % N; // Passa a vez para o próximo filósofo
     }
 }
 
 void pega_talheres(int n) {
-    // Marca os talheres como ocupados
-    talheres_disponiveis[ESQ(n)] = 0;
-    talheres_disponiveis[DIR(n)] = 0;
+    // Simula pegar os talheres (apenas atualiza o estado, protegido pelo mutex)
     printf("\tFilósofo %d pegou talher %d e talher %d\n", n, ESQ(n), DIR(n));
 }
 
 void devolve_talheres(int n) {
-    // Libera os talheres
-    talheres_disponiveis[ESQ(n)] = 1;
-    talheres_disponiveis[DIR(n)] = 1;
+    // Simula devolver os talheres e atualiza o estado
     estados[n] = PENSANDO;
     printf("\tFilósofo %d voltou a pensar.\n", n);
     // Verifica se os vizinhos podem comer
